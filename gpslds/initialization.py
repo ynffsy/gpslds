@@ -2,6 +2,8 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
+
+
 def initialize_zs(K, zs_lim, num_per_dim):
     """
     Initializes inducing points on a num_per_dim^K grid between -zs_lim and zs_lim.
@@ -23,14 +25,51 @@ def initialize_zs(K, zs_lim, num_per_dim):
     zs = jnp.stack(jnp.meshgrid(*all_zs_per_dim), axis=-1).reshape(-1, K)
     return zs
 
+
+# def initialize_affine_params(K, ys):
+#     """Initialize C, d with PCA (for Gaussian observation model)."""
+#     ys_stacked = jnp.vstack(ys) # (total_n_samps, K)
+#     d_init = ys_stacked.mean(0)
+#     ys_centered = ys_stacked - d_init
+#     U, S, Vt = jnp.linalg.svd(ys_centered, full_matrices=False)
+#     C_init = Vt[:K].T # (D, K)
+#     return C_init, d_init
+
+
 def initialize_affine_params(K, ys):
-    """Initialize C, d with PCA (for Gaussian observation model)."""
-    ys_stacked = jnp.vstack(ys) # (total_n_samps, K)
-    d_init = ys_stacked.mean(0)
-    ys_centered = ys_stacked - d_init
+    """Initialize C, d, and R with PCA (for Gaussian observation model)."""
+    # Stack the observed data across trials and time points
+    ys_stacked = ys.reshape(-1, ys.shape[-1])  # (total_n_samples, D)
+    
+    # Compute the mean across all observations
+    d_init = ys_stacked.mean(axis=0)  # (D,)
+    
+    # Center the data by subtracting the mean
+    ys_centered = ys_stacked - d_init  # (total_n_samples, D)
+    
+    # Perform SVD on the centered data
     U, S, Vt = jnp.linalg.svd(ys_centered, full_matrices=False)
-    C_init = Vt[:K].T # (D, K)
-    return C_init, d_init
+    
+    # Initialize C using the top K principal components
+    C_init = Vt[:K].T  # (D, K)
+    
+    # Project data onto the latent space to get initial latent states
+    X_init = ys_centered @ C_init  # (total_n_samples, K)
+    
+    # Reconstruct the observations using the initial C, d, and latent states
+    ys_reconstructed = X_init @ C_init.T + d_init  # (total_n_samples, D)
+    
+    # Compute residuals between actual and reconstructed observations
+    residuals = ys_stacked - ys_reconstructed  # (total_n_samples, D)
+    
+    # Estimate R as the variance of the residuals
+    R_init = jnp.var(residuals, axis=0)  # (D,)
+    
+    # Ensure R is positive and not too small to avoid numerical issues
+    R_init = jnp.maximum(R_init, 1e-6)
+    
+    return C_init, d_init, R_init
+
 
 def initialize_vem(n_trials, n_timesteps, K, M, I, mean_init, var_init):
     """Initialize parameters for variational EM algorithm"""
