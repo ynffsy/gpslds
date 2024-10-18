@@ -392,18 +392,36 @@ def fit_variational_em(key,
         learning_rates = jnp.arange(1, n_iters+1) ** (-0.5)
 
     # fit model
-    elbos_lst = []
+    elbos        = []
+    result_dicts = []
+
     for i in range(n_iters):
         key_i = jr.fold_in(key, i)
         batch_inds = jr.choice(key_i, n_trials, (batch_size,), replace=False)
         m0, S0, ms, Ss, lmbdas, Psis, As, bs, B, q_u_mu, q_u_sigma, mu0, V0, output_params, kernel_params, elbo_val = _step(batch_inds, m0, S0, ms, Ss, As, bs, B, q_u_mu, q_u_sigma, mu0, V0, output_params, kernel_params)
-        
-        elbos_lst.append(elbo_val)
+
+        elbos.append(elbo_val)
         if wandb is not None:
             wandb.log({"elbo": elbo_val})
         print(f"iter: {i}, elbo = {elbo_val}")
         if not jnp.isfinite(elbo_val):
             break
 
-    return ms, Ss, As, bs, B, q_u_mu, q_u_sigma, output_params, kernel_params, elbos_lst
+        result_dicts.append({
+            'm0'            : m0, 
+            'S0'            : S0, 
+            'ms'            : ms, 
+            'Ss'            : Ss, 
+            'lmbdas'        : lmbdas,
+            'Psis'          : Psis,
+            'As'            : As, 
+            'bs'            : bs, 
+            'B'             : B, 
+            'q_u_mu'        : q_u_mu, 
+            'q_u_sigma'     : q_u_sigma, 
+            'mu0'           : mu0, 
+            'V0'            : V0, 
+            'output_params' : output_params, 
+            'kernel_params' : kernel_params})
 
+    return result_dicts, elbos
