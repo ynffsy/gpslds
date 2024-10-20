@@ -48,7 +48,7 @@ def initialize_affine_params(K, ys):
     ys_centered = ys_stacked - d_init  # (total_n_samples, D)
     
     # Perform SVD on the centered data
-    U, S, Vt = jnp.linalg.svd(ys_centered, full_matrices=False)
+    U, S, Vt = jnp.linalg.svd(ys_centered, full_matrices=True)
     
     # Initialize C using the top K principal components
     C_init = Vt[:K].T  # (D, K)

@@ -13,6 +13,8 @@ from initialization import initialize_vem
 import optax
 import wandb
 
+import ipdb
+
 # --------- ELBO FUNCTIONS ----------
 
 def kl(fn, m, S, A, b, input, B, q_u_mu, q_u_sigma, kernel, kernel_params):
@@ -294,12 +296,17 @@ def fit_variational_em(key,
                        inputs=None,
                        m0=None, 
                        mu0=None, 
+                       ms0=None,
+                       As0=None,
+                       bs0=None,
+                       Ss0=None,
                        n_iters=100, 
                        n_iters_e=15, 
                        n_iters_m=1, 
                        learning_rates=None, 
                        batch_size=30, 
-                       wandb=None):
+                       wandb=None,
+                       target_indices=None):
     """
     Run the full (stochastic) variational EM algorithm.
 
@@ -351,7 +358,7 @@ def fit_variational_em(key,
 
         # update output mapping parameters
         loss_fn_output_params = lambda output_params: -compute_elbo(dt, fn, likelihood, batch_inds, trial_mask_batch, ms_batch, Ss_batch, As_batch, bs_batch, inputs_batch, B, output_params, kernel, kernel_params)
-        output_params = likelihood.update_output_params(ms_batch, Ss_batch, output_params, loss_fn_output_params)
+        output_params = likelihood.update_output_params(ms_batch, Ss_batch, output_params, loss_fn_output_params, batch_inds=batch_inds)
 
         # learn kernel parameters
         loss_fn_kernel_params = lambda kernel_params: -compute_elbo(dt, fn, likelihood, batch_inds, trial_mask_batch, ms_batch, Ss_batch, As_batch, bs_batch, inputs_batch, B, output_params, kernel, kernel_params)
@@ -383,9 +390,15 @@ def fit_variational_em(key,
     if mu0 is None:
         mu0 = jnp.zeros((n_trials, K))
     mean_init, var_init = 0., dt * 10
+    # var_init = 1
     M = len(fn.zs)
     I = inputs.shape[-1]
     S0, V0, As, bs, ms, Ss, q_u_mu, q_u_sigma, B = initialize_vem(n_trials, n_timesteps, K, M, I, mean_init, var_init)
+
+    # ms = ms0 if ms0 is not None else ms
+    # As = np.tile(As0, (n_trials, n_timesteps, 1, 1)) if As0 is not None else As
+    # bs = np.tile(bs0, (n_trials, n_timesteps, 1))    if bs0 is not None else bs
+    # Ss = np.tile(Ss0, (n_trials, n_timesteps, 1, 1)) if Ss0 is not None else Ss
 
     # initialize a default learning rate schedule
     if learning_rates is None:
@@ -396,9 +409,34 @@ def fit_variational_em(key,
     result_dicts = []
 
     for i in range(n_iters):
-        key_i = jr.fold_in(key, i)
-        batch_inds = jr.choice(key_i, n_trials, (batch_size,), replace=False)
+        m0 = jnp.zeros((n_trials, K))
+        mu0 = jnp.zeros((n_trials, K))
+
+        # key_i = jr.fold_in(key, i)
+        # batch_inds = jr.choice(key_i, n_trials, (batch_size,), replace=False)
+
+        # ipdb.set_trace()
+
+        if target_indices is not None:
+            batch_inds = []
+
+            for target_id in np.tile(np.unique(target_indices), 10):
+                target_inds = np.where(target_indices == target_id)[0]
+                batch_inds.append(np.random.choice(target_inds, 1)[0])
+
+                if len(batch_inds) == batch_size:
+                    break 
+
+            batch_inds = jnp.array(batch_inds)
+
+        else:
+            key_i = jr.fold_in(key, i)
+            batch_inds = jr.choice(key_i, n_trials, (batch_size,), replace=False)
+
         m0, S0, ms, Ss, lmbdas, Psis, As, bs, B, q_u_mu, q_u_sigma, mu0, V0, output_params, kernel_params, elbo_val = _step(batch_inds, m0, S0, ms, Ss, As, bs, B, q_u_mu, q_u_sigma, mu0, V0, output_params, kernel_params)
+
+        # print(np.mean(m0, axis=0))
+        # ipdb.set_trace()
 
         elbos.append(elbo_val)
         if wandb is not None:

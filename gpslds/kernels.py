@@ -8,6 +8,10 @@ tfb = tfp.bijectors
 from functools import partial
 from utils import gaussian_int
 
+import ipdb
+
+
+
 class Kernel:
     def __init__(self, quadrature): 
         self.quadrature = quadrature

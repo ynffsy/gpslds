@@ -10,6 +10,10 @@ from functools import partial
 from utils import gaussian_int
 from em import sgd
 
+import ipdb
+
+
+
 class Likelihood:
     def __init__(self, ys_binned, t_mask):
         """Initialize Likelihood class"""
@@ -33,6 +37,7 @@ class Likelihood:
         output_params, _ = sgd(loss_fn, output_params, n_iters_m=n_iters_m, learning_rate=learning_rate)
         return output_params
 
+
 class Gaussian(Likelihood):
     def __init__(self, ys_binned, t_mask):
         """
@@ -45,7 +50,6 @@ class Gaussian(Likelihood):
         """
         super().__init__(ys_binned, t_mask)
         self.n_trials, self.T, self.D = ys_binned.shape
-        self.n_total_obs = t_mask.sum()
     
     def ell(self, y, m, S, output_params):
         """Compute expectation wrt q(x) = N(x|m,S) of Gaussian log-likelihood at an observation y."""
@@ -59,7 +63,7 @@ class Gaussian(Likelihood):
         ell_on_grid = vmap(partial(self.ell, output_params=output_params))(ys, ms, Ss) # vmap across time
         return jnp.where(t_mask != 0, ell_on_grid, 0).sum()
 
-    def update_output_params(self, ms, Ss, output_params, loss_fn, n_iters_m=None, learning_rate=None):
+    def update_output_params(self, ms, Ss, output_params, loss_fn, n_iters_m=None, learning_rate=None, batch_inds=None):
         """
         Perform closed-form updates for output mapping parameters for Gaussian likelihood model.
 
@@ -78,32 +82,42 @@ class Gaussian(Likelihood):
         C, d, R = output_params['C'], output_params['d'], output_params['R']
 
         # stack things across trials
-        ys_binned_stacked = self.ys_binned.reshape(-1, self.D)
-        t_mask_stacked = self.t_mask.reshape(-1)
+        if batch_inds is not None:
+            ys_binned_batch = self.ys_binned[batch_inds]
+            t_mask_batch = self.t_mask[batch_inds]
+        else:
+            ys_binned_batch = self.ys_binned
+            t_mask_batch = self.t_mask
+
+        ys_binned_stacked = ys_binned_batch.reshape(-1, self.D)
+        t_mask_stacked = t_mask_batch.reshape(-1)[:, None]
+        n_total_obs = t_mask_stacked.sum()
+
         ms_stacked, Ss_stacked = ms.reshape(-1, K), Ss.reshape(-1, K, K)
     
         # update for C
         C_term1_on_grid = vmap(jnp.outer)(ys_binned_stacked - d, ms_stacked) # (-1, D, K)
-        C_term1 = (t_mask_stacked[:,None,None] * C_term1_on_grid).sum(0)
+        C_term1 = (t_mask_stacked[:, None] * C_term1_on_grid).sum(0)
         C_term2_on_grid = Ss_stacked + vmap(jnp.outer)(ms_stacked, ms_stacked) # (-1, K, K)
-        C_term2 = (t_mask_stacked[:,None,None] * C_term2_on_grid).sum(0)
+        C_term2 = (t_mask_stacked[:, None] * C_term2_on_grid).sum(0)
         C = jnp.linalg.solve(C_term2, C_term1.T).T # (D, K)
     
         # update for d
-        d_term1_on_grid = ys_binned_stacked - (C @ ms_stacked[...,None]).squeeze(-1) # (-1, D)
-        d_term1 = (t_mask_stacked[:,None] * d_term1_on_grid).sum(0) # (D, )
-        d = 1. / self.n_total_obs * d_term1 # (D, )
+        d_term1_on_grid = ys_binned_stacked - (C @ ms_stacked[..., None]).squeeze(-1) # (-1, D)
+        d_term1 = (t_mask_stacked * d_term1_on_grid).sum(0) # (D, )
+        d = 1. / n_total_obs * d_term1 # (D, )
     
         # update for R
-        all_mus = (C @ ms_stacked[...,None]).squeeze(-1) + d # (-1, D)
+        all_mus = (C @ ms_stacked[..., None]).squeeze(-1) + d # (-1, D)
         all_vars = vmap(jnp.diag)(C @ Ss_stacked @ C.T) # (-1, D)
-        R_term1 = (t_mask_stacked[:,None] * ys_binned_stacked**2).sum(0) # (D, )
-        R_term2 = -2 * (t_mask_stacked[:,None] * ys_binned_stacked * all_mus).sum(0) # (D, )
-        R_term3 = (t_mask_stacked[:,None] * (all_vars + all_mus**2)).sum(0) # (D, )
-        R = 1. / self.n_total_obs * (R_term1 + R_term2 + R_term3)
+        R_term1 = (t_mask_stacked * ys_binned_stacked**2).sum(0) # (D, )
+        R_term2 = -2 * (t_mask_stacked * ys_binned_stacked * all_mus).sum(0) # (D, )
+        R_term3 = (t_mask_stacked * (all_vars + all_mus**2)).sum(0) # (D, )
+        R = 1. / n_total_obs * (R_term1 + R_term2 + R_term3)
 
         output_params = {'C': C, 'd': d, 'R': R}
         return output_params
+
 
 class Poisson(Likelihood):
     def __init__(self, ys_binned, t_mask, dt, quadrature, link='softplus'):
@@ -142,6 +156,7 @@ class Poisson(Likelihood):
         """Compute expected Poisson log-likelihood over one trial."""
         ell_on_grid = vmap(partial(self.ell, output_params=output_params))(ys, ms, Ss) # vmap across time
         return jnp.where(t_mask != 0, ell_on_grid, 0).sum()
+
 
 class PoissonProcess(Likelihood):
     def __init__(self, ys_binned, t_mask, dt, quadrature, link='softplus'):
@@ -193,3 +208,4 @@ class PoissonProcess(Likelihood):
         ell_jump = vmap(jnp.where, (0, 0, None))(t_obs_mask.T, ell_jump_on_grid.T, 0).sum() # (K, T) -> scalar
         ell_term = ell_cont + ell_jump
         return ell_term
+    
