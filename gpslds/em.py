@@ -358,7 +358,8 @@ def fit_variational_em(key,
 
         # update output mapping parameters
         loss_fn_output_params = lambda output_params: -compute_elbo(dt, fn, likelihood, batch_inds, trial_mask_batch, ms_batch, Ss_batch, As_batch, bs_batch, inputs_batch, B, output_params, kernel, kernel_params)
-        output_params = likelihood.update_output_params(ms_batch, Ss_batch, output_params, loss_fn_output_params, batch_inds=batch_inds)
+        # output_params = likelihood.update_output_params(ms_batch, Ss_batch, output_params, loss_fn_output_params, batch_inds=batch_inds)
+        output_params = likelihood.update_output_params(ms_batch, Ss_batch, output_params, loss_fn_output_params)
 
         # learn kernel parameters
         loss_fn_kernel_params = lambda kernel_params: -compute_elbo(dt, fn, likelihood, batch_inds, trial_mask_batch, ms_batch, Ss_batch, As_batch, bs_batch, inputs_batch, B, output_params, kernel, kernel_params)
@@ -409,8 +410,8 @@ def fit_variational_em(key,
     result_dicts = []
 
     for i in range(n_iters):
-        m0 = jnp.zeros((n_trials, K))
-        mu0 = jnp.zeros((n_trials, K))
+        # m0 = jnp.zeros((n_trials, K))
+        # mu0 = jnp.zeros((n_trials, K))
 
         # key_i = jr.fold_in(key, i)
         # batch_inds = jr.choice(key_i, n_trials, (batch_size,), replace=False)

@@ -13,6 +13,10 @@ from functools import partial
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 
+import ipdb
+
+
+
 def gaussian_int(fn, m, S, weights, unit_sigmas):
     """Approximates E[f(x)] wrt x ~ N(m, S) with Gauss-Hermite quadrature."""
     sigmas = m + (jnp.linalg.cholesky(S) @ unit_sigmas[...,None]).squeeze(-1)
@@ -82,10 +86,12 @@ def bin_sparse_data(ys, t_obs, t_max, dt):
         for j, idx in enumerate(t_idx):
             if j < len(t_idx) - 1:
                 y_inds_in_bin = np.nonzero((bins[idx] <= t_obs[i]) & (t_obs[i] < bins[idx+1]))[0] # get indices of n_samps where obs are in this bin
-                ys_binned[idx] = ys[i, y_inds_in_bin].mean(0) # taken mean of those obs
+                # ys_binned[idx] = ys[i, y_inds_in_bin].mean(0) # taken mean of those obs
+                ys_binned[idx] = ys[i, y_inds_in_bin].sum(0)
             else:
                 y_inds_in_bin = np.nonzero((bins[idx] <= t_obs[i]) & (t_obs[i] <= bins[idx+1]))[0] # get indices of n_samps where obs are in this bin
-                ys_binned[idx] = ys[i, y_inds_in_bin].mean(0) # taken mean of those obs
+                # ys_binned[idx] = ys[i, y_inds_in_bin].mean(0) # taken mean of those obs
+                ys_binned[idx] = ys[i, y_inds_in_bin].sum(0)
 
         all_t_mask.append(hist != 0)
         all_ys_binned.append(ys_binned)

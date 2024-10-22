@@ -32,7 +32,7 @@ class Likelihood:
         """Compute expected log-likelihood over all trials"""
         return vmap(partial(self.ell_over_time, output_params=output_params))(self.ys_binned, self.t_mask, ms, Ss).sum()
 
-    def update_output_params(self, ms, Ss, output_params, loss_fn, n_iters_m=200, learning_rate=.08):
+    def update_output_params(self, ms, Ss, output_params, loss_fn, n_iters_m=200, learning_rate=.08, batch_inds=None):
         """By default, learn output parameters with SGD (except for Gaussian case, where there are closed-form updates, see below)"""
         output_params, _ = sgd(loss_fn, output_params, n_iters_m=n_iters_m, learning_rate=learning_rate)
         return output_params
