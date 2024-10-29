@@ -40,7 +40,7 @@ def kl(fn, m, S, A, b, input, B, q_u_mu, q_u_sigma, kernel, kernel_params):
     kl += jnp.trace(A.T @ A @ (S + jnp.outer(m, m)))
     kl += 2 * jnp.dot(m, A.T @ fn.f(m, S, q_u_mu, q_u_sigma, kernel_params))
     kl += jnp.dot(b, b - 2 * fn.f(m, S, q_u_mu, q_u_sigma, kernel_params) - 2 * A @ m)
-    
+
     # compute input-dependent KL part
     kl += 2 * jnp.dot(B @ input, fn.f(m, S, q_u_mu, q_u_sigma, kernel_params) + A @ m - b)
     kl += jnp.dot(B @ input, B @ input)
@@ -284,29 +284,30 @@ def sgd(loss_fn, params, n_iters_m, learning_rate):
 
     return final_params, all_elbos[-1]
 
-def fit_variational_em(key, 
-                       K, 
-                       dt, 
-                       fn, 
-                       likelihood, 
-                       trial_mask, 
-                       output_params, 
-                       kernel, 
-                       kernel_params, 
-                       inputs=None,
-                       m0=None, 
-                       mu0=None, 
-                       ms0=None,
-                       As0=None,
-                       bs0=None,
-                       Ss0=None,
-                       n_iters=100, 
-                       n_iters_e=15, 
-                       n_iters_m=1, 
-                       learning_rates=None, 
-                       batch_size=30, 
-                       wandb=None,
-                       target_indices=None):
+def fit_variational_em(
+    key, 
+    K, 
+    dt, 
+    fn, 
+    likelihood, 
+    trial_mask, 
+    output_params, 
+    kernel, 
+    kernel_params, 
+    inputs=None,
+    m0=None, 
+    mu0=None, 
+    ms0=None,
+    As0=None,
+    bs0=None,
+    Ss0=None,
+    n_iters=100, 
+    n_iters_e=15, 
+    n_iters_m=1, 
+    learning_rates=None, 
+    batch_size=30, 
+    wandb=None,
+    target_indices=None):
     """
     Run the full (stochastic) variational EM algorithm.
 
@@ -464,3 +465,80 @@ def fit_variational_em(key,
             'kernel_params' : kernel_params})
 
     return result_dicts, elbos
+
+
+def transform_variational_em(
+    dt, 
+    fn, 
+    likelihood, 
+    trial_mask, 
+    train_result_dict,
+    kernel, 
+    inputs,
+    n_iters_e=15):
+    """
+    Perform inference using the learned parameters.
+
+    Parameters:
+    -----------------
+    dt: integration timestep
+    fn: class object from transition.py
+    likelihood: class object from likelihoods.py
+    trial_mask: (n_trials, n_timesteps) binary mask indicating when trials are active (handles varying-length trials)
+    output_params: dict containing output mapping parameters
+    kernel: class object from kernels.py
+    kernel_params: dict containing kernel parameters
+    inputs: (n_trials, n_timesteps, I) external inputs
+    B: (K, I) learned input effect matrix
+    q_u_mu, q_u_sigma: (K, M), (K, M, M) variational parameters for inducing points
+    n_iters_e: number of E-step iterations to run
+
+    Returns:
+    -----------------
+    ms, Ss: (n_trials, n_timesteps, K), (n_trials, n_timesteps, K, K) posterior marginals of latent states
+    As, bs: (n_trials, n_timesteps, K, K), (n_trials, n_timesteps, K) variational parameters for dynamics
+    """
+    n_trials, n_timesteps, _ = likelihood.ys_binned.shape
+
+    m0            = train_result_dict['m0']
+    S0            = train_result_dict['S0']
+    As            = train_result_dict['As']
+    bs            = train_result_dict['bs']
+    B             = train_result_dict['B']
+    q_u_mu        = train_result_dict['q_u_mu']
+    q_u_sigma     = train_result_dict['q_u_sigma']
+    output_params = train_result_dict['output_params']
+    kernel_params = train_result_dict['kernel_params']
+
+    if inputs is None:
+        inputs = jnp.zeros((n_trials, n_timesteps, 1))
+
+    # Run E-step
+    batch_inds = jnp.arange(n_trials)
+    trial_mask_batch = trial_mask
+    inputs_batch = inputs
+
+    ms, Ss, lmbdas, Psis, As, bs = e_step(
+        dt, fn, likelihood, batch_inds, trial_mask_batch, As, bs, m0, S0,
+        inputs_batch, B, q_u_mu, q_u_sigma, output_params, kernel, kernel_params,
+        n_iters_e=n_iters_e
+    )
+
+    elbo_val = compute_elbo_all_trials(dt, fn, likelihood, trial_mask, ms, Ss, As, bs, inputs, B, output_params, kernel, kernel_params, q_u_mu, q_u_sigma) 
+
+    result_dict = {
+        'm0'            : m0, 
+        'S0'            : S0, 
+        'ms'            : ms, 
+        'Ss'            : Ss, 
+        'lmbdas'        : lmbdas,
+        'Psis'          : Psis,
+        'As'            : As, 
+        'bs'            : bs, 
+        'B'             : B, 
+        'q_u_mu'        : q_u_mu, 
+        'q_u_sigma'     : q_u_sigma, 
+        'output_params' : output_params, 
+        'kernel_params' : kernel_params}
+    
+    return result_dict, elbo_val
