@@ -1,6 +1,7 @@
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+from sklearn.decomposition import FactorAnalysis
 
 
 
@@ -67,6 +68,23 @@ def initialize_affine_params(K, ys):
     
     # Ensure R is positive and not too small to avoid numerical issues
     R_init = jnp.maximum(R_init, 1e-6)
+    
+    return C_init, d_init, R_init
+
+
+def initialize_affine_params_FA(K, ys, random_state):
+    """Initialize C, d, and R with factor analysis (for Gaussian observation model)."""
+    # Stack the observed data across trials and time points
+    ys_stacked = ys.reshape(-1, ys.shape[-1])  # (total_n_samples, D)
+
+    fa = FactorAnalysis(
+        n_components=K, 
+        random_state=random_state)
+    fa.fit(ys_stacked)
+
+    C_init = fa.components_.T
+    d_init = fa.mean_
+    R_init = fa.noise_variance_
     
     return C_init, d_init, R_init
 
